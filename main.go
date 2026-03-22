@@ -59,8 +59,6 @@ func main() {
 
 	var err error
 
-	rand.Seed(time.Now().UnixNano())
-
 	dsn := os.Getenv("DSN")
 	if dsn == "" {
 		log.Fatal("DSN environment variable required. [username[:password]@][protocol[(address)]]/dbname[?param1=value1&...&paramN=valueN]")
@@ -79,7 +77,11 @@ func main() {
 		initTable(initRecords)
 	}
 
-	defer db.Close()
+	defer func() {
+		if err := db.Close(); err != nil {
+			log.Println(err)
+		}
+	}()
 
 	err = db.Ping()
 	if err != nil {
@@ -95,7 +97,9 @@ func main() {
 
 	seqs := []Sequence{}
 
-	err = db.Select(&seqs, "SELECT id, counter FROM sequences ORDER BY id")
+	if err = db.Select(&seqs, "SELECT id, counter FROM sequences ORDER BY id"); err != nil {
+		log.Fatal(err)
+	}
 
 	wgWorker := sync.WaitGroup{}
 	for i := 0; i < workers; i++ {
@@ -114,7 +118,9 @@ func main() {
 
 	if verbose {
 		seqs = []Sequence{}
-		err = db.Select(&seqs, "SELECT id, counter FROM sequences ORDER BY id")
+		if err = db.Select(&seqs, "SELECT id, counter FROM sequences ORDER BY id"); err != nil {
+			log.Fatal(err)
+		}
 		for _, s := range seqs {
 			fmt.Printf("AFTER %s = %d\n", s.Id, s.Counter)
 		}
@@ -129,7 +135,7 @@ func IncrWorker(wg *sync.WaitGroup, ch <-chan string, respCh chan int64) {
 	defer wg.Done()
 	for {
 		id, more :=  <-ch
-		if more == false {
+		if !more {
 			break
 		}
 
@@ -148,7 +154,7 @@ func IncrWorker(wg *sync.WaitGroup, ch <-chan string, respCh chan int64) {
 		}
 		if err != nil {
 			log.Println(err)
-			tx.Rollback()
+			_ = tx.Rollback()
 			continue
 		}
 		if dbServer == "mysql" {
@@ -158,13 +164,13 @@ func IncrWorker(wg *sync.WaitGroup, ch <-chan string, respCh chan int64) {
 		}
 		if err != nil {
 			log.Println(err)
-			tx.Rollback()
+			_ = tx.Rollback()
 			continue
 		}
 		err = tx.Commit()
 		if err != nil {
 			log.Println(err)
-			tx.Rollback()
+			_ = tx.Rollback()
 			continue
 		}
 
@@ -183,7 +189,7 @@ func responseChecker(wg *sync.WaitGroup, ch <- chan int64) {
 	data := make([]float64, 0, 1000)
 	for {
 		msec, more := <-ch
-		if more == false {
+		if !more {
 			break
 		}
 		data = append(data, float64(msec))
